@@ -1,5 +1,4 @@
 # 2025/6/18 by Wang Zixuan
-# 2025/6/18 modified by Gemini
 import jittor as jt
 import numpy as np
 import os

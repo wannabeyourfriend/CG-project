@@ -1,5 +1,4 @@
 # 2025/6/18 by Wang Zixuan
-# 2025/6/18 modified by Gemini
 import jittor as jt
 import numpy as np
 import os
@@ -16,7 +15,7 @@ from dataset.format import id_to_name
 from dataset.sampler import SamplerMix
 from models.skin import create_model
 from dataset.exporter import Exporter
-from models.loss import L1Loss # Changed: Import specific loss
+from models.loss import L1Loss 
 
 jt.flags.use_cuda = 1
 
@@ -93,7 +92,6 @@ def train(args):
         current_lr = adjust_learning_rate(optimizer, epoch, args)
         model.train()
         
-        # --- [CHANGED] Add accumulator for MSE loss ---
         epoch_train_loss_mse = jt.Var(0.0)
         epoch_train_loss_l1 = jt.Var(0.0)
 
@@ -103,7 +101,6 @@ def train(args):
             
             outputs = model(vertices, joints)
 
-            # --- [CHANGED] Calculate and combine both losses ---
             loss_mse = criterion_mse(outputs, skin)
             loss_l1 = criterion_l1(outputs, skin)
             loss = loss_mse + loss_l1
@@ -119,7 +116,6 @@ def train(args):
                         log_message(f"Epoch [{epoch+1}/{args.epochs}] Batch [{batch_idx+1}/{len(train_loader)}] "
                                     f"Loss MSE: {loss_mse.item():.6f} L1: {loss_l1.item():.6f}")
 
-        # --- Aggregate and Log Training Loss ---
         avg_train_loss_mse_local = epoch_train_loss_mse / len(train_loader)
         avg_train_loss_l1_local = epoch_train_loss_l1 / len(train_loader)
 
@@ -132,17 +128,14 @@ def train(args):
 
         if jt.rank == 0:
             epoch_time = time.time() - start_time
-            # --- [CHANGED] Log both average losses for the epoch ---
             log_message(f"Epoch [{epoch+1}/{args.epochs}] "
                         f"Train Loss MSE: {final_avg_train_mse.item():.6f} "
                         f"L1: {final_avg_train_l1.item():.6f} "
                         f"Time: {epoch_time:.2f}s "
                         f"LR: {current_lr:.6f}")
 
-        # --- Validation Phase ---
         if val_loader is not None and (epoch + 1) % args.val_freq == 0:
             model.eval()
-            # --- [CHANGED] Add accumulator for validation MSE loss ---
             epoch_val_loss_mse = jt.Var(0.0)
             epoch_val_loss_l1 = jt.Var(0.0)
             
@@ -150,7 +143,6 @@ def train(args):
                 vertices, joints, skin = val_data['vertices'], val_data['joints'], val_data['skin']
                 outputs = model(vertices, joints)
                 
-                # --- [CHANGED] Calculate both losses for validation ---
                 loss_mse = criterion_mse(outputs, skin)
                 loss_l1 = criterion_l1(outputs, skin) 
                 
@@ -178,10 +170,8 @@ def train(args):
             
             if jt.rank == 0:
                 avg_val_l1_value = final_avg_val_l1.item()
-                # --- [CHANGED] Log both validation losses ---
                 log_message(f"Validation Loss --> MSE: {final_avg_val_mse.item():.6f} L1: {avg_val_l1_value:.6f}")
                 
-                # Best model is still saved based on L1 loss, as it's the key metric
                 if avg_val_l1_value < best_loss:
                     best_loss = avg_val_l1_value
                     model_path = os.path.join(args.output_dir, 'best_model.pkl')

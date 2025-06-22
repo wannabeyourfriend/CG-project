@@ -14,9 +14,8 @@ from dataset.exporter import Exporter
 from models.skeleton import create_model
 
 from models.metrics import J2J
-from models.loss import * # 引入新的loss
+from models.loss import * 
 
-# Set Jittor flags
 jt.flags.use_cuda = 1
 
 def train(args):
@@ -200,7 +199,6 @@ def main():
     """Parse arguments and start training"""
     parser = argparse.ArgumentParser(description='Train a point cloud model')
     
-    # Dataset parameters
     parser.add_argument('--train_data_list', type=str, required=True,
                         help='Path to the training data list file')
     parser.add_argument('--val_data_list', type=str, default='',
@@ -208,7 +206,6 @@ def main():
     parser.add_argument('--data_root', type=str, default='data',
                         help='Root directory for the data files')
     
-    # Model parameters
     parser.add_argument('--model_name', type=str, default='ptcnn',
                         choices=[ 'ptcnn','pct', 'pct2', 'pct3', 'pctlast',],
                         help='Model architecture to use')
@@ -218,7 +215,6 @@ def main():
     parser.add_argument('--pretrained_model', type=str, default='',
                         help='Path to pretrained model')
     
-    # Training parameters
     parser.add_argument('--batch_size', type=int, default=128,
                         help='Batch size for training')
     parser.add_argument('--epochs', type=int, default=100,
@@ -233,14 +229,12 @@ def main():
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='Momentum for SGD optimizer')
     
-    # Loss parameters
     parser.add_argument('--symmetry_type', type=str, default='none',
                     choices=['none', 'position', 'structure'],
                     help='Symmetry loss type: none / position / structure')
     parser.add_argument('--symmetry_weight', type=float, default=0.0,
                     help='Symmetry loss weight')
     
-    # Output parameters
     parser.add_argument('--output_dir', type=str, default='output/skeleton',
                         help='Directory to save output files')
     parser.add_argument('--print_freq', type=int, default=10,

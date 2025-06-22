@@ -5,17 +5,13 @@ from jittor.contrib import concat
 import numpy as np
 from math import sqrt
 
-# 导入PCT模型组件（假设已正确安装PCT库）
 from PCT.networks.cls.pct import Point_Transformer, Point_Transformer2, Point_Transformer_Last, SA_Layer, Local_op, sample_and_group, Point_Transformer_v3, PTCNN
 from PCT.misc.ops import knn_point, index_points, square_distance, topk
 
-
-# 注意：Attention类已在skeleton_models.py中定义，此处通过导入使用
-from .skeleton import Attention  # 假设已正确处理跨文件导入
+from .skeleton import Attention  
 
 
 class MLP(nn.Module):
-    """多层感知机模块"""
     def __init__(self, input_dim: int, output_dim: int):
         super().__init__()
         self.input_dim = input_dim
@@ -35,13 +31,11 @@ class MLP(nn.Module):
 
 
 class PTCNNSkinModel_Advanced(nn.Module):
-    """基于PTCNN的高级蒙皮模型"""
     def __init__(self, feat_dim: int, num_joints: int):
         super().__init__()
         self.feat_dim = feat_dim  # PTCNN融合后的特征维度（1024）
         self.num_joints = num_joints
         
-        # 复用PTCNN特征提取层
         self.conv1 = nn.Conv1d(3, 64, 1, bias=False); self.bn1 = nn.BatchNorm1d(64)
         self.conv2 = nn.Conv1d(64, 64, 1, bias=False); self.bn2 = nn.BatchNorm1d(64)
         self.gather0 = Local_op(128, 128); self.sa0 = SA_Layer(128)
@@ -54,11 +48,9 @@ class PTCNNSkinModel_Advanced(nn.Module):
         )
         self.relu = nn.ReLU()
         
-        # 关节点特征生成模块
         self.joint_pos_embed = nn.Linear(3, self.feat_dim)  # 关节点坐标位置编码
         self.joint_attention = Attention(embed_dim=self.feat_dim, num_heads=8)  # 引用Attention类
         
-        # 逐点特征生成模块
         self.vertex_feature_mlp = nn.Sequential(
             nn.Linear(self.feat_dim + 3, self.feat_dim),
             nn.ReLU(),
@@ -68,7 +60,6 @@ class PTCNNSkinModel_Advanced(nn.Module):
         B, N, _ = vertices.shape
         xyz = vertices  # (B, N, 3)
         
-        # PTCNN特征提取
         x = vertices.transpose(0, 2, 1)
         x = self.relu(self.bn1(self.conv1(x))); x = self.relu(self.bn2(self.conv2(x)))
         feat = x.permute(0, 2, 1)
@@ -80,7 +71,6 @@ class PTCNNSkinModel_Advanced(nn.Module):
         keypoint_features = self.conv_fuse(concat([pt_feat, feat1], dim=1))  # (B, feat_dim, 256)
         keypoint_xyz = new_xyz_2  # (B, 256, 3)
         
-        # 特征传播：从关键点插值到原始点
         sqrdists = square_distance(vertices, keypoint_xyz)
         dist, idx = topk(sqrdists, 3, dim=-1, largest=False)
         dist_recip = 1.0 / (dist + 1e-8)
@@ -92,11 +82,9 @@ class PTCNNSkinModel_Advanced(nn.Module):
         )
         vertex_features = self.vertex_feature_mlp(concat([vertices, interpolated_features], dim=-1))  # (B, N, feat_dim)
         
-        # 关节点特征生成：交叉注意力
         joint_queries = self.joint_pos_embed(joints)  # (B, J, feat_dim)
         joint_features = self.joint_attention(joint_queries, keypoint_features.transpose(0, 2, 1), keypoint_features.transpose(0, 2, 1))  # (B, J, feat_dim)
         
-        # 蒙皮权重计算：点积相似度+softmax
         attn_logits = vertex_features @ joint_features.transpose(0, 2, 1)  # (B, N, J)
         res = nn.softmax(attn_logits / sqrt(self.feat_dim), dim=-1)
         assert not jt.isnan(res).any()
@@ -104,7 +92,6 @@ class PTCNNSkinModel_Advanced(nn.Module):
 
 
 class PTCNNSkinModel(nn.Module):
-    """基于PTCNN的基础蒙皮模型"""
     def __init__(self, feat_dim: int, num_joints: int):
         super().__init__()
         self.num_joints = num_joints
@@ -115,10 +102,8 @@ class PTCNNSkinModel(nn.Module):
         self.relu = nn.ReLU()
 
     def execute(self, vertices: jt.Var, joints: jt.Var):
-        # 提取全局形状特征
         shape_latent = self.relu(self.pct(vertices.permute(0, 2, 1)))  # (B, feat_dim)
         
-        # 顶点特征与关节点特征生成
         vertices_latent = self.vertex_mlp(concat([
             vertices, 
             shape_latent.unsqueeze(1).repeat(1, vertices.shape[1], 1)
@@ -128,7 +113,6 @@ class PTCNNSkinModel(nn.Module):
             shape_latent.unsqueeze(1).repeat(1, self.num_joints, 1)
         ], dim=-1))  # (B, J, feat_dim)
         
-        # 计算蒙皮权重
         res = nn.softmax(
             vertices_latent @ joints_latent.permute(0, 2, 1) / sqrt(self.feat_dim), 
             dim=-1
@@ -137,7 +121,6 @@ class PTCNNSkinModel(nn.Module):
         return res
 
 
-# 基础蒙皮模型变体
 class SimpleSkinModel(nn.Module):
     def __init__(self, feat_dim: int, num_joints: int):
         super().__init__()
@@ -242,7 +225,6 @@ class SimpleSkinModellast(nn.Module):
         return res
 
 
-# 蒙皮模型工厂函数
 def create_model(model_name='ptcnn', feat_dim=256, **kwargs):
     if model_name == "ptcnn":
         return PTCNNSkinModel(feat_dim=feat_dim, num_joints=22)

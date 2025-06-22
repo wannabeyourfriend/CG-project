@@ -5,11 +5,8 @@ import os
 from datetime import datetime
 import numpy as np
 from jittor.dataset import Dataset
-import copy # 导入 copy 模块
+import copy # 
 
-# ======================================================================================
-# 依赖项导入
-# ======================================================================================
 from typing import Tuple, Dict
 from abc import ABC, abstractmethod
 
@@ -127,7 +124,6 @@ jt.flags.use_cuda = 1
 # Asset 类
 # ======================================================================================
 class Asset:
-    """包含关节体数据的容器，包括骨骼层级结构。"""
     def __init__(self, data_dict):
         self.vertices = data_dict.get('vertices')
         self.faces = data_dict.get('faces')
@@ -141,7 +137,6 @@ class Asset:
 
     @classmethod
     def load(cls, path):
-        """从单个 .npz 文件加载 asset。"""
         try:
             data = np.load(path, allow_pickle=True)
             data_dict = {key: data[key] for key in data.files}
@@ -152,7 +147,6 @@ class Asset:
             return None
     
     def complete_skeleton_info(self, parent_hierarchy):
-        """使用固定的父节点层级来计算 T-pose 的局部和世界变换矩阵。"""
         self.parent = parent_hierarchy
         self.matrix_local = np.tile(np.eye(4), (self.joints.shape[0], 1, 1))
         
@@ -174,7 +168,6 @@ class Asset:
         self.recompute_matrix_world()
 
     def recompute_matrix_world(self):
-        """根据局部矩阵和层级关系，按正确的拓扑顺序重新计算世界变换矩阵。"""
         if self.matrix_local is None or self.parent is None:
             self.matrix_world = None
             return
@@ -207,24 +200,18 @@ class Asset:
                 queue.append(c_idx)
 
     def copy(self):
-        """返回此对象的深拷贝。"""
         return copy.deepcopy(self)
 
 def linear_blend_skinning(V, W, J_inv_mats, pose):
-    """在CPU上执行线性混合蒙皮。"""
     T = pose @ J_inv_mats
     V_hom = np.concatenate([V, np.ones((V.shape[0], 1))], axis=1)
     V_posed_hom = np.einsum('nj,jxy,ny->nx', W, T, V_hom)
     V_posed = V_posed_hom[:, :3] / (V_posed_hom[:, 3, np.newaxis] + 1e-8)
     return V_posed
 
-# ======================================================================================
-# 数据集实现
-# ======================================================================================
 SMPL_PARENTS = np.array([-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19])
 
 def transform_to_unit_cube(asset: Asset):
-    """将 asset 的顶点和关节归一化到 [-1, 1]^3 的立方体中。"""
     if asset.vertices is None or asset.vertices.shape[0] == 0:
         return asset, np.zeros(3), 1.0
     min_vals = np.min(asset.vertices, axis=0)
@@ -246,7 +233,6 @@ def transform_to_unit_cube(asset: Asset):
     return asset, center, scale
 
 class ArticulatedBodyDataset(Dataset):
-    """为基于LBS的训练准备数据的数据集。"""
     def __init__(self, data_root, mode, n_points, n_joints):
         super().__init__()
         self.data_root = data_root
@@ -279,7 +265,6 @@ class ArticulatedBodyDataset(Dataset):
 
         gt_joints = jt.array(t_pose_asset.joints.copy()).float32()
         
-        # 1. 采样点和对应的权重
         sampled_points_np, _normals, sampled_groups = self.sampler.sample(
             vertices=t_pose_asset.vertices,
             vertex_normals=t_pose_asset.vertex_normals,
@@ -314,7 +299,6 @@ class ArticulatedBodyDataset(Dataset):
         gt_pose = jt.array(posed_asset.matrix_world).float32()
         gt_J_inv_mats = jt.array(np.linalg.inv(t_pose_asset.matrix_world)).float32()
 
-        # 3. 计算姿态变换后的 *采样点* 作为真值 (Ground Truth)
         gt_posed_sampled_points_np = linear_blend_skinning(
             V=sampled_points_np, W=sampled_groups['skin'],
             J_inv_mats=np.linalg.inv(t_pose_asset.matrix_world),
@@ -324,9 +308,6 @@ class ArticulatedBodyDataset(Dataset):
 
         return points, gt_joints, gt_weights, gt_posed_points, gt_J_inv_mats, gt_pose
 
-# ======================================================================================
-# 损失函数, 训练流程, 主函数
-# ======================================================================================
 
 def J2J(joints_a: jt.Var, joints_b: jt.Var) -> jt.Var:
     '''
@@ -355,7 +336,6 @@ def train_step(model, lbs_layer, optimizer, data, l1_loss_fn, loss_weights):
     
     pred_joints, pred_weights = model(points)
     
-    # 使用真实的骨骼位姿来计算顶点损失，以稳定训练
     pred_posed_points = lbs_layer(points, pred_weights, gt_J_inv_mats, gt_pose)
     
     w_j, w_s, w_v = loss_weights
@@ -369,7 +349,6 @@ def train_step(model, lbs_layer, optimizer, data, l1_loss_fn, loss_weights):
     optimizer.step()
     return {'total_loss': total_loss.item(), 'j2j_loss': loss_j.item(), 'skin_l1_loss': loss_s.item(), 'vertex_l1_loss': loss_v.item()}
 
-# 新增：辅助函数，用于从预测的骨骼关节点计算逆绑定矩阵
 def get_inv_bind_pose_from_joints(joints_batch_numpy, parents):
     """
     Computes inverse bind pose matrices from joint positions for a batch.
@@ -381,7 +360,6 @@ def get_inv_bind_pose_from_joints(joints_batch_numpy, parents):
 
     for i in range(batch_size):
         joints = joints_batch_numpy[i]
-        # 使用临时的 Asset 对象来运行前向动力学逻辑
         temp_asset = Asset({'joints': joints})
         temp_asset.complete_skeleton_info(parents)
         
@@ -389,49 +367,38 @@ def get_inv_bind_pose_from_joints(joints_batch_numpy, parents):
             try:
                 inv_bind_poses[i] = np.linalg.inv(temp_asset.matrix_world)
             except np.linalg.LinAlgError:
-                # 如果矩阵是奇异的，则回退到单位矩阵
                 print(f"Warning: Singular matrix encountered in validation for batch item {i}. Using identity.")
                 inv_bind_poses[i] = np.tile(np.eye(4), (num_joints, 1, 1))
         else:
-            # 如果矩阵计算失败，则回退
             print(f"Warning: World matrix computation failed in validation for batch item {i}. Using identity.")
             inv_bind_poses[i] = np.tile(np.eye(4), (num_joints, 1, 1))
             
     return inv_bind_poses
 
-# 已更新：validate_step 现在计算两个版本的顶点损失
 def validate_step(model, lbs_layer, data, l1_loss_fn):
     model.eval()
     points, gt_joints, gt_weights, gt_posed_points, gt_J_inv_mats, gt_pose = data
     with jt.no_grad():
         pred_joints, pred_weights = model(points)
         
-        # --- 损失 1：解耦损失 (用于诊断) ---
-        # 这是原始的计算方式，使用真实的骨骼变换矩阵
-        # 它可以纯粹地衡量权重预测的质量，不受骨骼预测误差的影响
         pred_posed_points_decoupled = lbs_layer(points, pred_weights, gt_J_inv_mats, gt_pose)
         loss_j = J2J(pred_joints, gt_joints)
         loss_s = l1_loss_fn(pred_weights, gt_weights)
         loss_v_decoupled = l1_loss_fn(pred_posed_points_decoupled, gt_posed_points)
         
-        # --- 损失 2：耦合损失 (用于最终评分) ---
-        # 这里的计算同时使用了预测的骨骼和预测的权重，真实地反映了模型的端到端性能
-        # 1. 从预测的骨骼关节点(pred_joints)计算逆绑定矩阵
         pred_joints_np = pred_joints.numpy()
         pred_J_inv_mats_np = get_inv_bind_pose_from_joints(pred_joints_np, SMPL_PARENTS)
         pred_J_inv_mats = jt.array(pred_J_inv_mats_np)
         
-        # 2. 使用预测的骨骼矩阵和预测的权重计算顶点位置
         pred_posed_points_coupled = lbs_layer(points, pred_weights, pred_J_inv_mats, gt_pose)
         
-        # 3. 计算用于评分的耦合顶点损失
         loss_v_coupled = l1_loss_fn(pred_posed_points_coupled, gt_posed_points)
 
     return {
         'val_j2j_loss': loss_j.item(), 
         'val_skin_l1_loss': loss_s.item(), 
-        'val_vertex_l1_loss': loss_v_decoupled.item(),       # 解耦损失 (用于诊断)
-        'val_vertex_l1_loss_score': loss_v_coupled.item()    # 耦合损失 (用于评分)
+        'val_vertex_l1_loss': loss_v_decoupled.item(),       
+        'val_vertex_l1_loss_score': loss_v_coupled.item()
     }
 
 def calculate_score(cd_j2j_loss, skin_l1_loss, vertex_l1_loss):
@@ -444,20 +411,11 @@ def calculate_score(cd_j2j_loss, skin_l1_loss, vertex_l1_loss):
     return score
 
 def get_loss_weights(epoch, args):
-    """
-    根据当前 epoch 动态获取损失权重。
-    - 前 5 个 epoch: 只优化骨骼预测 (J2J loss)。
-    - 10 到 20 epoch: 只优化蒙皮权重。
-    - 20 epoch 之后: 多目标优化。
-    """
     if epoch < 3:
-        # 阶段 1: 只关注骨骼预测
         return 1.0, 0.0, 0.0
     elif epoch < 10:
-        # 阶段 2: 只关注蒙皮权重
         return 0.0, args.w_s, 0.0
     else:
-        # 阶段 3: 多目标联合优化
         return args.w_j, args.w_s, args.w_v * 0
 
 def main():
@@ -503,7 +461,6 @@ def main():
         global_step = checkpoint.get('global_step', start_epoch * len(train_loader))
 
     for epoch in range(start_epoch, args.epochs):
-        # *** 新增: 在每个 epoch 开始时获取动态权重 ***
         loss_weights = get_loss_weights(epoch, args)
         w_j, w_s, w_v = loss_weights
         print(f"Epoch {epoch+1}/{args.epochs} - Using loss weights: J2J={w_j}, Skin={w_s}, Vertex={w_v}")
@@ -518,7 +475,6 @@ def main():
             if i % 20 == 0: print(f"Epoch {epoch+1}/{args.epochs}, Step {i}/{len(train_loader)}, Loss: {step_losses['total_loss']:.4f}")
             global_step += 1
         
-        # 已更新：初始化字典以包含新的评分损失
         val_loss_dict = {k: [] for k in ['val_j2j_loss', 'val_skin_l1_loss', 'val_vertex_l1_loss', 'val_vertex_l1_loss_score']}
         for data in val_loader:
             step_losses = validate_step(model, lbs_layer, data, l1_loss_fn)
@@ -529,13 +485,11 @@ def main():
         avg_val_vertex_decoupled = np.mean(val_loss_dict['val_vertex_l1_loss'])
         avg_val_vertex_score = np.mean(val_loss_dict['val_vertex_l1_loss_score'])
         
-        # 已更新：使用耦合损失 (avg_val_vertex_score) 来计算分数
         score = calculate_score(avg_val_j2j, avg_val_skin, avg_val_vertex_score)
         
         writer.add_scalar('Score/validation', score, epoch)
         writer.add_scalar('ValLoss/j2j', avg_val_j2j, epoch)
         writer.add_scalar('ValLoss/skin_l1', avg_val_skin, epoch)
-        # 已更新：同时记录两个版本的顶点损失以供分析
         writer.add_scalar('ValLoss/vertex_l1_decoupled', avg_val_vertex_decoupled, epoch)
         writer.add_scalar('ValLoss/vertex_l1_for_score', avg_val_vertex_score, epoch)
         
